@@ -1,0 +1,28 @@
+{
+  "line_start": [
+    534,
+    4
+  ],
+  "line_end": [
+    527,
+    477
+  ],
+  "line_type": "vertical",
+  "line_position": 530,
+  "line_length": 473,
+  "line_angle": 89.15213281121753,
+  "gate_width": 60,
+  "entry_side": "right",
+  "frame_width": 640,
+  "frame_height": 480,
+  "calibration_timestamp": 1758746115.7273922,
+  "calibration_date": "2025-09-24T17:35:15.727392",
+  "config_version": "2.0",
+  "calibrator": "advanced_yolo_counter",
+  "detection_area": {
+    "x": 410,
+    "y": 0,
+    "width": 240,
+    "height": 480
+  }
+}

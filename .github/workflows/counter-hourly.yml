@@ -1,0 +1,74 @@
+name: Hourly Counter (GMT-3) via Tailscale
+
+on:
+  schedule:
+    - cron: "0 * * * *"     # a cada hora (UTC)
+  workflow_dispatch: {}
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 70
+    permissions:
+      contents: write
+
+    # ---- Variáveis disponíveis para TODOS os passos (inclui o if) ----
+    env:
+      REPORT_MODE: 'graph_excel'                 # ou 'csv'
+      RUN_TZ: 'America/Sao_Paulo'
+      HEADLESS_MAX_SEC: '3600'
+      HEADLESS: '1'
+
+      # Câmera / resolver
+      CAM_LAST_IP: ${{ secrets.CAM_LAST_IP }}
+      CAM_CIDR:    ${{ secrets.CAM_CIDR }}
+      CAM_USER:    ${{ secrets.CAM_USER }}
+      CAM_PASS:    ${{ secrets.CAM_PASS }}
+      CAM_PATH:    ${{ secrets.CAM_PATH }}
+      CAM_PORT:    ${{ secrets.CAM_PORT }}
+
+      # Reporter (Excel Online)
+      EXCEL_TENANT_ID:     ${{ secrets.EXCEL_TENANT_ID }}
+      EXCEL_CLIENT_ID:     ${{ secrets.EXCEL_CLIENT_ID }}
+      EXCEL_CLIENT_SECRET: ${{ secrets.EXCEL_CLIENT_SECRET }}
+      EXCEL_DRIVE_ID:      ${{ secrets.EXCEL_DRIVE_ID }}
+      EXCEL_ITEM_ID:       ${{ secrets.EXCEL_ITEM_ID }}
+      EXCEL_WORKSHEET:     ${{ secrets.EXCEL_WORKSHEET }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Tailscale up
+        uses: tailscale/github-action@v2
+        with:
+          authkey: ${{ secrets.TS_AUTHKEY }}
+          args: --accept-routes=true
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          # Instala PyTorch CPU pelo índice oficial (evita falhas no PyPI padrão)
+          pip install --index-url https://download.pytorch.org/whl/cpu \
+            torch==2.2.2+cpu torchvision==0.17.2+cpu torchaudio==2.2.2+cpu
+          # Demais dependências do projeto
+          pip install -r requirements.txt
+
+      - name: Run counter headless (~1h)
+        run: |
+          python run_counter_headless.py --last-ip "${CAM_LAST_IP}" --cidr "${CAM_CIDR}" --user "${CAM_USER}" --password "${CAM_PASS}" --path "${CAM_PATH}" --port "${CAM_PORT}"
+
+      # Só roda se REPORT_MODE == 'csv'
+      - name: Commit CSV (optional)
+        if: ${{ env.REPORT_MODE == 'csv' }}
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git add movimento_entradas.csv || true
+          git commit -m "update csv" || true
+          git push || true
