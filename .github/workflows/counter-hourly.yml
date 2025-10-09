@@ -19,7 +19,7 @@ jobs:
     env:
       REPORT_MODE: 'csv'                         # grava CSV e commita
       RUN_TZ: 'America/Sao_Paulo'
-      HEADLESS_MAX_SEC: '300'                    # temporário p/ teste rápido
+      HEADLESS_MAX_SEC: '3600'
       HEADLESS: '1'
 
       # Câmera / resolver
