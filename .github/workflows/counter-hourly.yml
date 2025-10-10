@@ -94,22 +94,7 @@ jobs:
           # Demais dependências do projeto
           pip install -r requirements.txt
 
-      # Teste temporário: grava entrada de teste no Google Sheets
-      - name: Test Google Sheets write (temp)
-        if: ${{ github.event_name == 'workflow_dispatch' }}
-        run: |
-          python - << 'PY'
-          import datetime as dt
-          from reporter import Reporter
-          rep = Reporter()
-          now = dt.datetime.utcnow() - dt.timedelta(hours=3)
-          when = now.replace(hour=10, minute=0, second=0, microsecond=0)
-          ok = rep.write_hourly(7, when=when)
-          print("OK: wrote test row for", when.date(), "10h = 7", "->", ok)
-          PY
-
       - name: Run counter headless (~1h)
-        if: ${{ false }}  # temporário: desabilitado enquanto PC da loja está offline
         run: |
           python run_counter_headless.py --last-ip "${CAM_LAST_IP}" --cidr "${CAM_CIDR}" --user "${CAM_USER}" --password "${CAM_PASS}" --path "${CAM_PATH}" --port "${CAM_PORT}"
 
