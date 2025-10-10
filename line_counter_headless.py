@@ -91,8 +91,8 @@ def _now_gmt3():
 def _within_run_window_gmt3(now=None):
     if now is None:
         now = _now_gmt3()
-    # roda e reporta entre 09–21 (GMT-3)
-    return 9 <= now.hour <= 21
+    # reporta entre 10-21 (GMT-3)
+    return 10 <= now.hour <= 21
 
 os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = (
     "rtsp_transport;tcp|stimeout;10000000|max_delay;0|buffer_size;512000|"

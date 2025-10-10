@@ -120,59 +120,78 @@ jobs:
 
       - name: Compute wait and run window (tolerant start)
         id: prep
+        shell: python
         env:
-          PRE_RESOLVE_OK: ${{ steps.pre_resolve.outputs.ok }}
+          PROBE_INTERVAL: '60'
+          MAX_WAIT_SEC: '1800'
+          MIN_RUN_SEC: '1800'
+          SAFETY_MARGIN: '30'
         run: |
-          # pre-wait tolerante: sem 'set -e' para não falhar em tentativas
-          PROBE_INTERVAL=60
-          MAX_WAIT_SEC=1800
-          MIN_RUN_SEC=1800
-          SAFETY_MARGIN=30
+          import os, time, socket, datetime as dt
 
-          echo "Waiting (up to ${MAX_WAIT_SEC}s) for camera reachability ${CAM_LAST_IP}:${CAM_PORT}..."
-          start_ts=$(date -u +%s)
-          deadline=$((start_ts + MAX_WAIT_SEC))
-          reachable=0
-          next_resolve_ts=$start_ts   # tenta resolver imediatamente
-          while [ $(date -u +%s) -lt $deadline ]; do
-            now_loop=$(date -u +%s)
+          def tcp_ok(ip: str, port: int, timeout: int = 5) -> bool:
+            try:
+              with socket.create_connection((ip, port), timeout=timeout):
+                return True
+            except Exception:
+              return False
 
-            # Se já resolveu antes, sai
-            if [ "${PRE_RESOLVE_OK}" = "1" ]; then reachable=1; break; fi
+          start = time.time()
+          max_wait = int(os.getenv('MAX_WAIT_SEC', '1800'))
+          probe = int(os.getenv('PROBE_INTERVAL', '60'))
+          min_run = int(os.getenv('MIN_RUN_SEC', '1800'))
+          overlap = 5  # segundos para terminar APÓS o topo da hora
 
-            # (mantém placeholder para futuras tentativas a cada 5 min, se desejar)
-            # next_resolve_ts logic omitida para evitar erros de sintaxe no YAML
+          last_ip = os.getenv('CAM_LAST_IP')
+          port = int(os.getenv('CAM_PORT', '554'))
 
-            # Probe TCP no último IP conhecido
-            if timeout 5 bash -c "</dev/tcp/${CAM_LAST_IP}/${CAM_PORT}" 2>/dev/null; then
-              echo "OK: TCP reachability confirmed"
-              reachable=1; break
-            else
-              echo "WAIT: not reachable yet"
-            fi
-            sleep ${PROBE_INTERVAL}
-          done
+          def try_resolve() -> bool:
+            try:
+              from camera_resolver import resolve_rtsp
+              url = resolve_rtsp(
+                last_ip=os.getenv('CAM_LAST_IP'),
+                cidr=os.getenv('CAM_CIDR'),
+                user=os.getenv('CAM_USER'),
+                password=os.getenv('CAM_PASS'),
+                path=os.getenv('CAM_PATH'),
+                port=port,
+                use_cache=False,
+              )
+              return bool(url)
+            except Exception:
+              return False
 
-          now=$(date -u +%s)
-          next_hour=$(( ( (now/3600) + 1 ) * 3600 ))
-          remain=$(( next_hour - now ))
-          run_sec=$(( remain - SAFETY_MARGIN ))
+          # Primeiro tentamos o último IP. Só depois de 5 min começamos a resolver.
+          next_resolve = start + 300
+          reachable = False
+          while time.time() - start < max_wait:
+            now = time.time()
+            # 1) Probe TCP no último IP conhecido, a cada minuto
+            if tcp_ok(last_ip, port, timeout=5):
+              reachable = True
+              break
+            # 2) Resolver a cada 5 minutos (após 5 min iniciais)
+            if now >= next_resolve:
+              if try_resolve():
+                reachable = True
+                break
+              next_resolve = now + 300
+            time.sleep(probe)
 
-          if [ $reachable -eq 0 ]; then
-            echo "Camera not reachable within wait window; proceeding anyway with remaining time."
-          fi
+          # Calcula tempo restante até o topo da próxima hora (UTC)
+          now_utc = dt.datetime.utcnow()
+          next_hour = (now_utc.replace(minute=0, second=0, microsecond=0)
+                       + dt.timedelta(hours=1))
+          remain = int((next_hour - now_utc).total_seconds())
+          run_sec = max(0, remain + overlap)
+          # limita a no máximo ~3610s
+          if run_sec > 3610:
+            run_sec = 3610
 
-          if [ $run_sec -lt $MIN_RUN_SEC ]; then
-            echo "Remaining time ${run_sec}s is below MIN_RUN_SEC=${MIN_RUN_SEC}s. Skipping this hour."
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "run_sec=0" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          if [ $run_sec -gt 3600 ]; then run_sec=3600; fi
-          echo "Will run counter for ${run_sec}s (until top of next hour)."
-          echo "skip=false" >> "$GITHUB_OUTPUT"
-          echo "run_sec=${run_sec}" >> "$GITHUB_OUTPUT"
+          skip = run_sec < min_run
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+            f.write(f"skip={'true' if skip else 'false'}\n")
+            f.write(f"run_sec={0 if skip else run_sec}\n")
 
       - name: Run counter headless (~1h)
         if: ${{ steps.prep.outputs.skip != 'true' }}
