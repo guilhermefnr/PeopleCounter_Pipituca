@@ -1,9 +1,18 @@
 # reporter.py
 import os
 import csv
+import json
 import datetime as dt
 import requests
 import msal
+
+# Opcional (Google Sheets)
+try:
+    import gspread
+    from google.oauth2 import service_account
+except Exception:
+    gspread = None
+    service_account = None
 
 # Fuso fixo GMT-3 (sem DST). Se quiser precisão total, use zoneinfo/pytz.
 def _now_local():
@@ -40,7 +49,7 @@ def _headers():
 
 class Reporter:
     def __init__(self):
-        self.mode = os.getenv("REPORT_MODE", "graph_excel")  # "graph_excel" | "csv"
+        self.mode = os.getenv("REPORT_MODE", "graph_excel")  # "graph_excel" | "csv" | "gsheets_wide"
         # Credenciais/IDs para Graph
         self.tenant_id  = os.getenv("EXCEL_TENANT_ID")
         self.client_id  = os.getenv("EXCEL_CLIENT_ID")
@@ -50,6 +59,10 @@ class Reporter:
         self.worksheet  = os.getenv("EXCEL_WORKSHEET", "Planilha1")
         # CSV fallback
         self.csv_path   = os.getenv("CSV_PATH", "movimento_entradas.csv")
+        # Google Sheets (modo largo 10..21)
+        self.gs_json    = os.getenv("GSHEETS_CREDENTIALS_JSON")
+        self.gs_sheet   = os.getenv("GSHEETS_SPREADSHEET_ID")
+        self.gs_ws_name = os.getenv("GSHEETS_WORKSHEET", "Entradas_por_hora")
 
     # ===================== Excel (Graph) =====================
     def _get_graph_session(self):
@@ -122,6 +135,72 @@ class Reporter:
                 f"{base}/workbook/worksheets/{self.worksheet}/range(address='{sum_addr}')/formula",
                 json={"formulas": [[f"=SUM({b_letter}{row}:{n_letter}{row})"]]}
             )
+            return True
+
+        if self.mode == "gsheets_wide":
+            if gspread is None or service_account is None:
+                raise RuntimeError("Dependências Google (gspread/google-auth) não instaladas")
+
+            # Cabeçalho 10..21 (largo)
+            headers = ["Data"] + [f"{h:02d}" for h in range(10, 22)] + ["TotalEntradas"]
+
+            # Autentica via Service Account (JSON no env)
+            try:
+                info = json.loads(self.gs_json)
+            except Exception as e:
+                raise RuntimeError(f"GSHEETS_CREDENTIALS_JSON inválido: {e}")
+
+            creds = service_account.Credentials.from_service_account_info(
+                info,
+                scopes=["https://www.googleapis.com/auth/spreadsheets"]
+            )
+            client = gspread.authorize(creds)
+
+            sh = client.open_by_key(self.gs_sheet)
+            try:
+                ws = sh.worksheet(self.gs_ws_name)
+            except gspread.WorksheetNotFound:
+                ws = sh.add_worksheet(title=self.gs_ws_name, rows=200, cols=15)
+
+            # Garante cabeçalho A1:O1
+            last_col_letter = _col_letter(1 + (21 - 10 + 1) + 1)  # Data(1) + horas(12) + Total(1) = 14 -> N; mas 10..21 = 12 colunas
+            # Correção: 10..21 são 12 colunas, logo Data(A)=1, horas(B..M)=12, Total(N)=1
+            # Então última coluna é N (14). Vamos fixar endereço A1:N1.
+            ws.batch_update([
+                {
+                    "range": "A1:N1",
+                    "values": [headers]
+                }
+            ])
+
+            # Localiza/Cria linha da data
+            col_a = ws.col_values(1)
+            row = None
+            for idx, val in enumerate(col_a, start=1):
+                if idx == 1:
+                    continue  # header
+                if val == date_str:
+                    row = idx
+                    break
+            if row is None:
+                # append nova linha com Data + blanks
+                skeleton = [date_str] + ["" for _ in range(12)] + [""]
+                ws.append_row(skeleton, value_input_option="USER_ENTERED")
+                row = len(col_a) + 1
+
+            # Coluna da hora (10..21) -> B..M (2..13)
+            col_idx = 2 + (hour - 10)
+            addr = f"{_col_letter(col_idx)}{row}:{_col_letter(col_idx)}{row}"
+            ws.batch_update([
+                {"range": addr, "values": [[int(entradas_count)]]}
+            ], value_input_option="USER_ENTERED")
+
+            # Total (N) = SUM(B..M)
+            total_col_letter = "N"
+            ws.batch_update([
+                {"range": f"{total_col_letter}{row}:{total_col_letter}{row}",
+                 "values": [[f"=SUM(B{row}:M{row})"]]}
+            ], value_input_option="USER_ENTERED")
             return True
 
         # ===================== CSV fallback =====================

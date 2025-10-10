@@ -17,10 +17,13 @@ jobs:
 
     # ---- Variáveis disponíveis para TODOS os passos (inclui o if) ----
     env:
-      REPORT_MODE: 'csv'                         # grava CSV e commita
+      REPORT_MODE: 'gsheets_wide'                # grava no Google Sheets (aba larga)
       RUN_TZ: 'America/Sao_Paulo'
       HEADLESS_MAX_SEC: '3600'
       HEADLESS: '1'
+      GSHEETS_CREDENTIALS_JSON: ${{ secrets.GSHEETS_CREDENTIALS_JSON }}
+      GSHEETS_SPREADSHEET_ID: ${{ secrets.GSHEETS_SPREADSHEET_ID }}
+      GSHEETS_WORKSHEET: ${{ secrets.GSHEETS_WORKSHEET }}
 
       # Câmera / resolver
       CAM_LAST_IP: ${{ secrets.CAM_LAST_IP }}
