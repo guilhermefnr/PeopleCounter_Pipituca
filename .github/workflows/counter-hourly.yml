@@ -116,53 +116,22 @@ jobs:
             # Tenta resolver IP real via camera_resolver no início e a cada 5 minutos
             if [ $now_loop -ge $next_resolve_ts ]; then
               echo "Attempting resolve_rtsp (CIDR scan) ..."
-              python - << 'PY'
-import os, sys
-try:
-    from camera_resolver import resolve_rtsp
-    url = resolve_rtsp(
-        last_ip=os.getenv('CAM_LAST_IP'),
-        cidr=os.getenv('CAM_CIDR'),
-        user=os.getenv('CAM_USER'),
-        password=os.getenv('CAM_PASS'),
-        path=os.getenv('CAM_PATH'),
-        port=int(os.getenv('CAM_PORT','554')),
-        use_cache=False,
-    )
-    if url:
-        print('OK: resolver found URL ->', url)
-        sys.exit(0)
-    else:
-        print('Resolver did not find URL this time.')
-        sys.exit(1)
-except Exception as e:
-    print('Resolver error:', e)
-    sys.exit(1)
-PY
-              RES=$?
-              if [ $RES -eq 0 ]; then reachable=1; break; fi
+              if python -c "import os,sys; from camera_resolver import resolve_rtsp; \
+url=resolve_rtsp(last_ip=os.getenv('CAM_LAST_IP'), cidr=os.getenv('CAM_CIDR'), user=os.getenv('CAM_USER'), password=os.getenv('CAM_PASS'), path=os.getenv('CAM_PATH'), port=int(os.getenv('CAM_PORT','554')), use_cache=False); \
+print('URL' if url else ''); sys.exit(0 if url else 1)"; then
+                echo "OK: resolver found URL"
+                reachable=1; break
+              fi
               next_resolve_ts=$((now_loop + 300))  # re-tenta em 5 min
             fi
 
             # Probe TCP no último IP conhecido
-            python - << 'PY'
-import os, socket, sys
-ip = os.environ.get('CAM_LAST_IP')
-port = int(os.environ.get('CAM_PORT','554'))
-s = socket.socket(); s.settimeout(4)
-try:
-    s.connect((ip, port))
-    print("OK: TCP reachability confirmed")
-    sys.exit(0)
-except Exception as e:
-    print("WAIT: not reachable yet:", e)
-    sys.exit(1)
-finally:
-    try: s.close()
-    except: pass
-PY
-            RES=$?
-            if [ $RES -eq 0 ]; then reachable=1; break; fi
+            if timeout 5 bash -c "</dev/tcp/${CAM_LAST_IP}/${CAM_PORT}" 2>/dev/null; then
+              echo "OK: TCP reachability confirmed"
+              reachable=1; break
+            else
+              echo "WAIT: not reachable yet"
+            fi
             sleep ${PROBE_INTERVAL}
           done
 
