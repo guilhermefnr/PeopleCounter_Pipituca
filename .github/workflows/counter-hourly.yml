@@ -96,8 +96,32 @@ jobs:
           # Demais dependências do projeto
           pip install -r requirements.txt
 
+      - name: Try initial resolve (optional)
+        id: pre_resolve
+        shell: python
+        run: |
+          import os
+          try:
+              from camera_resolver import resolve_rtsp
+              url = resolve_rtsp(
+                  last_ip=os.getenv('CAM_LAST_IP'),
+                  cidr=os.getenv('CAM_CIDR'),
+                  user=os.getenv('CAM_USER'),
+                  password=os.getenv('CAM_PASS'),
+                  path=os.getenv('CAM_PATH'),
+                  port=int(os.getenv('CAM_PORT','554')),
+                  use_cache=False,
+              )
+              ok = '1' if url else '0'
+          except Exception:
+              ok = '0'
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write(f"ok={ok}\n")
+
       - name: Compute wait and run window (tolerant start)
         id: prep
+        env:
+          PRE_RESOLVE_OK: ${{ steps.pre_resolve.outputs.ok }}
         run: |
           # pre-wait tolerante: sem 'set -e' para não falhar em tentativas
           PROBE_INTERVAL=60
@@ -113,17 +137,11 @@ jobs:
           while [ $(date -u +%s) -lt $deadline ]; do
             now_loop=$(date -u +%s)
 
-            # Tenta resolver IP real via camera_resolver no início e a cada 5 minutos
-            if [ $now_loop -ge $next_resolve_ts ]; then
-              echo "Attempting resolve_rtsp (CIDR scan) ..."
-              if python -c "import os,sys; from camera_resolver import resolve_rtsp; \
-url=resolve_rtsp(last_ip=os.getenv('CAM_LAST_IP'), cidr=os.getenv('CAM_CIDR'), user=os.getenv('CAM_USER'), password=os.getenv('CAM_PASS'), path=os.getenv('CAM_PATH'), port=int(os.getenv('CAM_PORT','554')), use_cache=False); \
-print('URL' if url else ''); sys.exit(0 if url else 1)"; then
-                echo "OK: resolver found URL"
-                reachable=1; break
-              fi
-              next_resolve_ts=$((now_loop + 300))  # re-tenta em 5 min
-            fi
+            # Se já resolveu antes, sai
+            if [ "${PRE_RESOLVE_OK}" = "1" ]; then reachable=1; break; fi
+
+            # (mantém placeholder para futuras tentativas a cada 5 min, se desejar)
+            # next_resolve_ts logic omitida para evitar erros de sintaxe no YAML
 
             # Probe TCP no último IP conhecido
             if timeout 5 bash -c "</dev/tcp/${CAM_LAST_IP}/${CAM_PORT}" 2>/dev/null; then
