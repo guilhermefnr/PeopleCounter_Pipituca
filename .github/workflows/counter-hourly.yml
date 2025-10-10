@@ -3,13 +3,14 @@ name: Hourly Counter (GMT-3) via Tailscale
 on:
   schedule:
     - cron: "0 * * * *"     # a cada hora (UTC)
+    - cron: "5 * * * *"     # redundância: dispara no minuto 5
   workflow_dispatch: {}
 
 jobs:
   run:
     concurrency:
       group: peoplecounter-hourly
-      cancel-in-progress: true
+      cancel-in-progress: false   # evita paralelismo; enfileira redundante
     runs-on: ubuntu-latest
     timeout-minutes: 70
     permissions:
