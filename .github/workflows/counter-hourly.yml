@@ -95,7 +95,65 @@ jobs:
           # Demais dependências do projeto
           pip install -r requirements.txt
 
+      - name: Compute wait and run window (tolerant start)
+        id: prep
+        run: |
+          set -euo pipefail
+          PROBE_INTERVAL=60
+          MAX_WAIT_SEC=1800
+          MIN_RUN_SEC=1800
+          SAFETY_MARGIN=30
+
+          echo "Waiting (up to ${MAX_WAIT_SEC}s) for camera reachability ${CAM_LAST_IP}:${CAM_PORT}..."
+          start_ts=$(date -u +%s)
+          deadline=$((start_ts + MAX_WAIT_SEC))
+          reachable=0
+          while [ $(date -u +%s) -lt $deadline ]; do
+            python - << 'PY' || exit 1
+import os, socket, sys
+ip = os.environ.get('CAM_LAST_IP')
+port = int(os.environ.get('CAM_PORT','554'))
+s = socket.socket(); s.settimeout(4)
+try:
+    s.connect((ip, port))
+    print("OK: TCP reachability confirmed")
+    sys.exit(0)
+except Exception as e:
+    print("WAIT: not reachable yet:", e)
+    sys.exit(1)
+finally:
+    try: s.close()
+    except: pass
+PY
+            if [ $? -eq 0 ]; then reachable=1; break; fi
+            sleep ${PROBE_INTERVAL}
+          done
+
+          now=$(date -u +%s)
+          next_hour=$(( ( (now/3600) + 1 ) * 3600 ))
+          remain=$(( next_hour - now ))
+          run_sec=$(( remain - SAFETY_MARGIN ))
+
+          if [ $reachable -eq 0 ]; then
+            echo "Camera not reachable within wait window; proceeding anyway with remaining time."
+          fi
+
+          if [ $run_sec -lt $MIN_RUN_SEC ]; then
+            echo "Remaining time ${run_sec}s is below MIN_RUN_SEC=${MIN_RUN_SEC}s. Skipping this hour."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "run_sec=0" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ $run_sec -gt 3600 ]; then run_sec=3600; fi
+          echo "Will run counter for ${run_sec}s (until top of next hour)."
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          echo "run_sec=${run_sec}" >> "$GITHUB_OUTPUT"
+
       - name: Run counter headless (~1h)
+        if: ${{ steps.prep.outputs.skip != 'true' }}
+        env:
+          HEADLESS_MAX_SEC: ${{ steps.prep.outputs.run_sec }}
         run: |
           python run_counter_headless.py --last-ip "${CAM_LAST_IP}" --cidr "${CAM_CIDR}" --user "${CAM_USER}" --password "${CAM_PASS}" --path "${CAM_PATH}" --port "${CAM_PORT}"
 
