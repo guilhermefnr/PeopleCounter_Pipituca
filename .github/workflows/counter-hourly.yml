@@ -11,7 +11,7 @@ jobs:
       group: peoplecounter-hourly
       cancel-in-progress: true
     runs-on: ubuntu-latest
-    timeout-minutes: 55
+    timeout-minutes: 58
     permissions:
       contents: write
 
@@ -111,7 +111,7 @@ jobs:
 
       - name: Run counter headless
         if: steps.timing.outputs.skip != 'true'
-        timeout-minutes: 52
+        timeout-minutes: 58
         env:
           PYTHONUNBUFFERED: "1"
           RTSP_URL: "rtsp://${{ secrets.CAM_USER }}:${{ secrets.CAM_PASS }}@${{ secrets.CAM_LAST_IP }}:${{ secrets.CAM_PORT }}/${{ secrets.CAM_PATH }}"
