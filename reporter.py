@@ -39,10 +39,10 @@ def _col_letter(n: int) -> str:
 # Colunas: A=Data | B..M=9h..21h (13 cols) | N=TotalEntradas
 DATA_COL = 1
 FIRST_HOUR = 9
-LAST_HOUR = 21
+LAST_HOUR = 20
 FIRST_HOUR_COL = DATA_COL + 1          # 2 -> B
-LAST_HOUR_COL = FIRST_HOUR_COL + (LAST_HOUR - FIRST_HOUR)  # 14 -> M (13 colunas)
-TOTAL_COL = LAST_HOUR_COL + 1          # 15 -> N
+LAST_HOUR_COL = FIRST_HOUR_COL + (LAST_HOUR - FIRST_HOUR)  # 13 -> M (12 colunas)
+TOTAL_COL = LAST_HOUR_COL + 1          # 14 -> N
 
 
 def _row_for_day(day: int) -> int:
