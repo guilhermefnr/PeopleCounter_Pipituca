@@ -18,7 +18,7 @@ jobs:
     env:
       REPORT_MODE: gsheets_wide
       RUN_TZ: America/Sao_Paulo
-      HEADLESS_MAX_SEC: "3420"
+      HEADLESS_MAX_SEC: "3300"
       HEADLESS: "1"
       SAVE_INTERVAL_SEC: "600"
       GSHEETS_CREDENTIALS_JSON: ${{ secrets.GSHEETS_CREDENTIALS_JSON }}
@@ -111,7 +111,7 @@ jobs:
 
       - name: Run counter headless
         if: steps.timing.outputs.skip != 'true'
-        timeout-minutes: 58
+        timeout-minutes: 57
         env:
           PYTHONUNBUFFERED: "1"
           RTSP_URL: "rtsp://${{ secrets.CAM_USER }}:${{ secrets.CAM_PASS }}@${{ secrets.CAM_LAST_IP }}:${{ secrets.CAM_PORT }}/${{ secrets.CAM_PATH }}"
