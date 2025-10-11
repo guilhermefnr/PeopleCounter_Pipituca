@@ -35,14 +35,14 @@ def _col_letter(n: int) -> str:
 
 
 # ============ CONFIGURAÇÃO DA JANELA DE HORÁRIOS ============
-# IMPORTANTE: Janela ajustada para 10h-21h (12 colunas)
-# Colunas: A=Data | B..M=10h..21h (12 cols) | N=TotalEntradas
+# IMPORTANTE: Janela ajustada para 9h-21h (13 colunas)
+# Colunas: A=Data | B..M=9h..21h (13 cols) | N=TotalEntradas
 DATA_COL = 1
-FIRST_HOUR = 10  # ✅ CORRIGIDO: agora começa às 10h
+FIRST_HOUR = 9
 LAST_HOUR = 21
 FIRST_HOUR_COL = DATA_COL + 1          # 2 -> B
-LAST_HOUR_COL = FIRST_HOUR_COL + (LAST_HOUR - FIRST_HOUR)  # 13 -> M (12 colunas)
-TOTAL_COL = LAST_HOUR_COL + 1          # 14 -> N
+LAST_HOUR_COL = FIRST_HOUR_COL + (LAST_HOUR - FIRST_HOUR)  # 14 -> M (13 colunas)
+TOTAL_COL = LAST_HOUR_COL + 1          # 15 -> N
 
 
 def _row_for_day(day: int) -> int:
