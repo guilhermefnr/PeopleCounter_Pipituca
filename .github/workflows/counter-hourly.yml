@@ -18,7 +18,7 @@ jobs:
     env:
       REPORT_MODE: gsheets_wide
       RUN_TZ: America/Sao_Paulo
-      HEADLESS_MAX_SEC: "3000"
+      HEADLESS_MAX_SEC: "3420"
       HEADLESS: "1"
       SAVE_INTERVAL_SEC: "600"
       GSHEETS_CREDENTIALS_JSON: ${{ secrets.GSHEETS_CREDENTIALS_JSON }}
