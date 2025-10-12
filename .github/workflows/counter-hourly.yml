@@ -16,7 +16,7 @@ jobs:
       contents: write
 
     env:
-      REPORT_MODE: gsheets_wide
+      REPORT_MODE: gsheets
       RUN_TZ: America/Sao_Paulo
       HEADLESS_MAX_SEC: "3300"
       HEADLESS: "1"
