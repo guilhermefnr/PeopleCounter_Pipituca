@@ -432,6 +432,132 @@ class PeopleCounter:
             test_pt = (mx, line_y - 1) if entry_side == "top" else (mx, line_y + 1)
         return 1 if self.side_of_line(test_pt, p1, p2) >= 0 else -1
 
+    def reconnect_camera(self, current_url):
+        """
+        Tenta reconectar à câmera usando estratégia em duas fases:
+        FASE 1: Reconexão persistente (tolera quedas intermitentes até 30 min)
+        FASE 2: Resolve IP novamente (se IP mudou)
+        """
+        print(f"\n{'='*70}")
+        print("🔄 TENTANDO RECONEXÃO")
+        print(f"{'='*70}")
+        
+        # FASE 1: Reconexão persistente com backoff
+        # Schedule: 0s, 1min, 5min, 10min, 15min, 20min, 25min, 30min
+        retry_schedule = [0, 60, 300, 600, 900, 1200, 1500, 1800]  # segundos
+        retry_start = time.time()
+        
+        print("Fase 1: Reconexão persistente (tolerando quedas intermitentes)...")
+        
+        for attempt_idx, wait_time in enumerate(retry_schedule, start=1):
+            # Aguarda até o próximo intervalo agendado
+            while True:
+                elapsed = time.time() - retry_start
+                
+                # Verifica continuamente se câmera voltou durante espera
+                if elapsed >= wait_time:
+                    break  # Chegou no intervalo agendado
+                
+                # Testa se câmera voltou (quick check a cada 2s)
+                if int(elapsed) % 2 == 0:
+                    try:
+                        test_cap = cv2.VideoCapture(current_url, cv2.CAP_FFMPEG)
+                        if test_cap.isOpened():
+                            ret, _ = test_cap.read()
+                            if ret:
+                                print(f"  ✓ Câmera voltou durante espera! (após {int(elapsed)}s)")
+                                print(f"{'='*70}\n")
+                                return test_cap
+                            test_cap.release()
+                    except Exception:
+                        pass
+                
+                time.sleep(1)
+            
+            # Tentativa agendada
+            elapsed_min = int((time.time() - retry_start) / 60)
+            print(f"  Tentativa {attempt_idx}/{len(retry_schedule)} (após {elapsed_min} min)...")
+            
+            try:
+                cap = cv2.VideoCapture(current_url, cv2.CAP_FFMPEG)
+                if cap.isOpened():
+                    ret, _ = cap.read()
+                    if ret:
+                        print(f"  ✓ Reconexão bem-sucedida!")
+                        print(f"{'='*70}\n")
+                        return cap
+                    cap.release()
+            except Exception as e:
+                print(f"  ✗ Falhou: {e}")
+        
+        print(f"  ✗ Fase 1 falhou após {len(retry_schedule)} tentativas (30 min)")
+        
+        # FASE 2: Resolve IP (IP pode ter mudado)
+        print("\nFase 2: Verificando se IP mudou...")
+        
+        # Primeiro: tenta last_ip especificamente via RTSP
+        print("  Testando CAM_LAST_IP via RTSP...")
+        try:
+            from camera_resolver import _rtsp_request
+            
+            last_ip = os.getenv('CAM_LAST_IP')
+            port = int(os.getenv('CAM_PORT', '554'))
+            user = os.getenv('CAM_USER')
+            password = os.getenv('CAM_PASS')
+            path = os.getenv('CAM_PATH')
+            
+            if _rtsp_request(last_ip, port, user, password, path):
+                print(f"  ✓ CAM_LAST_IP ainda responde - tentando conexão...")
+                test_url = f"rtsp://{user}:{password}@{last_ip}:{port}/{path}"
+                cap = cv2.VideoCapture(test_url, cv2.CAP_FFMPEG)
+                if cap.isOpened():
+                    ret, _ = cap.read()
+                    if ret:
+                        print(f"  ✓ Reconectado ao IP anterior!")
+                        print(f"{'='*70}\n")
+                        return cap
+                    cap.release()
+        except Exception as e:
+            print(f"  ✗ Erro ao testar CAM_LAST_IP: {e}")
+        
+        # Segundo: varre rede para encontrar novo IP
+        print("  CAM_LAST_IP não responde - varrendo rede...")
+        try:
+            from camera_resolver import resolve_rtsp
+            
+            new_url = resolve_rtsp(
+                last_ip=os.getenv('CAM_LAST_IP'),
+                cidr=os.getenv('CAM_CIDR'),
+                user=os.getenv('CAM_USER'),
+                password=os.getenv('CAM_PASS'),
+                path=os.getenv('CAM_PATH'),
+                port=int(os.getenv('CAM_PORT', '554')),
+                use_cache=False  # Não usa cache pois já testamos last_ip
+            )
+            
+            if new_url:
+                safe_url = new_url.split('@')[1] if '@' in new_url else new_url
+                print(f"  ✓ Novo IP encontrado: {safe_url}")
+                
+                cap = cv2.VideoCapture(new_url, cv2.CAP_FFMPEG)
+                if cap.isOpened():
+                    ret, _ = cap.read()
+                    if ret:
+                        print(f"  ✓ Reconectado ao novo IP!")
+                        print(f"{'='*70}\n")
+                        return cap
+                    cap.release()
+            else:
+                print("  ✗ Nenhum IP válido encontrado na rede")
+        except ImportError:
+            print("  ✗ camera_resolver não disponível")
+        except Exception as e:
+            print(f"  ✗ Erro ao varrer rede: {e}")
+        
+        print("✗ Todas tentativas de reconexão falharam (Fase 1 + Fase 2)")
+        print(f"{'='*70}\n")
+        return None
+
     def detect_people(self, frame):
         results = self.model(frame,
                              conf=CONFIDENCE_THRESHOLD,
@@ -907,8 +1033,15 @@ class PeopleCounter:
                         print(f"✗ Falha ao ler frame ({consecutive_failures}/{MAX_CONSECUTIVE_FAILURES})")
                         
                         if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
-                            print(f"✗ Muitas falhas consecutivas - encerrando")
-                            break
+                            print(f"⚠ Muitas falhas consecutivas - tentando reconectar...")
+                            cap.release()
+                            cap = self.reconnect_camera(RTSP_URL)
+                            if cap is None:
+                                print(f"✗ Reconexão falhou - encerrando")
+                                break
+                            consecutive_failures = 0
+                            print(f"✓ Reconexão bem-sucedida - retomando contagem")
+                            continue
                         
                         time.sleep(0.5)
                         continue

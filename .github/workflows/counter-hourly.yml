@@ -61,51 +61,55 @@ jobs:
             torch==2.2.2+cpu torchvision==0.17.2+cpu torchaudio==2.2.2+cpu
           pip install -r requirements.txt
 
-      - name: Quick camera connectivity check
-        id: cam_check
+      - name: Resolve camera IP
+        id: cam_resolve
         continue-on-error: true
         timeout-minutes: 3
         shell: python
         run: |
-          import os, socket, time
+          import sys
+          sys.path.insert(0, '.')
+          from camera_resolver import resolve_rtsp
+          import os
           
-          def tcp_ok(ip: str, port: int, timeout: int = 5) -> bool:
-            try:
-              with socket.create_connection((ip, port), timeout=timeout):
-                return True
-            except Exception:
-              return False
+          print("🔍 Resolvendo IP da câmera...")
           
-          last_ip = os.getenv('CAM_LAST_IP')
-          port = int(os.getenv('CAM_PORT', '554'))
+          url = resolve_rtsp(
+              last_ip=os.getenv('CAM_LAST_IP'),
+              cidr=os.getenv('CAM_CIDR'),
+              user=os.getenv('CAM_USER'),
+              password=os.getenv('CAM_PASS'),
+              path=os.getenv('CAM_PATH'),
+              port=int(os.getenv('CAM_PORT', '554')),
+              use_cache=True
+          )
           
-          for i in range(3):
-            if tcp_ok(last_ip, port, timeout=5):
-              print(f"✓ Camera reachable at {last_ip}:{port}")
+          if url:
+              # Esconde credenciais no log
+              safe_url = url.split('@')[1] if '@' in url else url
+              print(f"✓ Câmera encontrada: {safe_url}")
               with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
-                f.write("reachable=true\n")
-              exit(0)
-            if i < 2:
-              time.sleep(60)
-          
-          print(f"✗ Camera NOT reachable at {last_ip}:{port}")
-          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
-            f.write("reachable=false\n")
+                  f.write(f"rtsp_url={url}\n")
+                  f.write("resolved=true\n")
+          else:
+              print("✗ Câmera não encontrada na rede")
+              with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+                  f.write("resolved=false\n")
 
-      - name: Calculate execution window
+      - name: Check camera resolution
         id: timing
         shell: python
         run: |
           import os
           
-          cam_ok = '${{ steps.cam_check.outputs.reachable }}' == 'true'
+          cam_ok = '${{ steps.cam_resolve.outputs.resolved }}' == 'true'
           
           if not cam_ok:
-            print("⚠ Camera not reachable - SKIPPING this cycle")
+            print("⚠ Camera not resolved - SKIPPING this cycle")
             with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
               f.write("skip=true\n")
           else:
-            print("✓ Camera OK - starting counter")
+            print("✓ Camera resolved - starting counter")
             with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
               f.write("skip=false\n")
 
@@ -114,7 +118,7 @@ jobs:
         timeout-minutes: 57
         env:
           PYTHONUNBUFFERED: "1"
-          RTSP_URL: "rtsp://${{ secrets.CAM_USER }}:${{ secrets.CAM_PASS }}@${{ secrets.CAM_LAST_IP }}:${{ secrets.CAM_PORT }}/${{ secrets.CAM_PATH }}"
+          RTSP_URL: ${{ steps.cam_resolve.outputs.rtsp_url }}
         run: |
           echo "🚀 Iniciando contador headless..."
           python run_counter_headless.py 2>&1 | tee counter_output.log
