@@ -16,9 +16,8 @@ jobs:
       contents: write
 
     env:
-      REPORT_MODE: gsheets
+      REPORT_MODE: gsheets_wide
       RUN_TZ: America/Sao_Paulo
-      HEADLESS_MAX_SEC: "3300"
       HEADLESS: "1"
       SAVE_INTERVAL_SEC: "600"
       GSHEETS_CREDENTIALS_JSON: ${{ secrets.GSHEETS_CREDENTIALS_JSON }}
@@ -61,68 +60,103 @@ jobs:
             torch==2.2.2+cpu torchvision==0.17.2+cpu torchaudio==2.2.2+cpu
           pip install -r requirements.txt
 
-      - name: Resolve camera IP
-        id: cam_resolve
+      - name: Quick camera connectivity check
+        id: cam_check
         continue-on-error: true
         timeout-minutes: 3
         shell: python
         run: |
-          import sys
-          sys.path.insert(0, '.')
-          from camera_resolver import resolve_rtsp
-          import os
+          import os, socket, time
           
-          print("🔍 Resolvendo IP da câmera...")
+          def tcp_ok(ip: str, port: int, timeout: int = 5) -> bool:
+            try:
+              with socket.create_connection((ip, port), timeout=timeout):
+                return True
+            except Exception:
+              return False
           
-          url = resolve_rtsp(
-              last_ip=os.getenv('CAM_LAST_IP'),
-              cidr=os.getenv('CAM_CIDR'),
-              user=os.getenv('CAM_USER'),
-              password=os.getenv('CAM_PASS'),
-              path=os.getenv('CAM_PATH'),
-              port=int(os.getenv('CAM_PORT', '554')),
-              use_cache=True
-          )
+          last_ip = os.getenv('CAM_LAST_IP')
+          port = int(os.getenv('CAM_PORT', '554'))
           
-          if url:
-              # Esconde credenciais no log
-              safe_url = url.split('@')[1] if '@' in url else url
-              print(f"✓ Câmera encontrada: {safe_url}")
+          for i in range(3):
+            if tcp_ok(last_ip, port, timeout=5):
+              print(f"✓ Camera reachable at {last_ip}:{port}")
               with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
-                  f.write(f"rtsp_url={url}\n")
-                  f.write("resolved=true\n")
-          else:
-              print("✗ Câmera não encontrada na rede")
-              with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
-                  f.write("resolved=false\n")
+                f.write("reachable=true\n")
+              exit(0)
+            if i < 2:
+              time.sleep(60)
+          
+          print(f"✗ Camera NOT reachable at {last_ip}:{port}")
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+            f.write("reachable=false\n")
 
-      - name: Check camera resolution
+      - name: Calculate execution window
         id: timing
         shell: python
         run: |
           import os
+          from datetime import datetime, timezone, timedelta
           
-          cam_ok = '${{ steps.cam_resolve.outputs.resolved }}' == 'true'
+          cam_ok = '${{ steps.cam_check.outputs.reachable }}' == 'true'
           
           if not cam_ok:
-            print("⚠ Camera not resolved - SKIPPING this cycle")
+            print("⚠ Camera not reachable - SKIPPING this cycle")
             with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
               f.write("skip=true\n")
           else:
-            print("✓ Camera resolved - starting counter")
+            # Horário atual em GMT-3
+            now_utc = datetime.now(timezone.utc)
+            now_gmt3 = now_utc - timedelta(hours=3)
+            
+            # Calcula deadline: minuto :55 da hora atual
+            deadline = now_gmt3.replace(minute=55, second=0, microsecond=0)
+            
+            # Se já passou de :55, vai para :55 da próxima hora
+            if now_gmt3.minute >= 55:
+              deadline = deadline + timedelta(hours=1)
+            
+            # Tempo disponível em segundos
+            available_seconds = int((deadline - now_gmt3).total_seconds())
+            
+            # Reserva 2 minutos (120s) para salvamento final
+            max_runtime = max(120, available_seconds - 120)
+            
+            print("=" * 60)
+            print("⏰ CÁLCULO DE TEMPO DE EXECUÇÃO")
+            print("=" * 60)
+            print(f"Horário atual (GMT-3): {now_gmt3.strftime('%Y-%m-%d %H:%M:%S')}")
+            print(f"Deadline (terminar em): {deadline.strftime('%H:%M:%S')}")
+            print(f"Tempo disponível: {available_seconds}s (~{available_seconds//60}min)")
+            print(f"Tempo de execução: {max_runtime}s (~{max_runtime//60}min {max_runtime%60}s)")
+            print(f"Margem para salvamento: 120s (2min)")
+            print("=" * 60)
+            print("✓ Camera OK - starting counter")
+            
             with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
               f.write("skip=false\n")
+              f.write(f"max_runtime={max_runtime}\n")
 
       - name: Run counter headless
         if: steps.timing.outputs.skip != 'true'
         timeout-minutes: 57
         env:
           PYTHONUNBUFFERED: "1"
-          RTSP_URL: ${{ steps.cam_resolve.outputs.rtsp_url }}
+          HEADLESS_MAX_SEC: ${{ steps.timing.outputs.max_runtime }}
+          RTSP_URL: "rtsp://${{ secrets.CAM_USER }}:${{ secrets.CAM_PASS }}@${{ secrets.CAM_LAST_IP }}:${{ secrets.CAM_PORT }}/${{ secrets.CAM_PATH }}"
         run: |
-          echo "🚀 Iniciando contador headless..."
+          echo "=" | tr -d '\n' | head -c 70 && echo
+          echo "🚀 INICIANDO CONTADOR HEADLESS"
+          echo "=" | tr -d '\n' | head -c 70 && echo
+          echo "⏱ Tempo máximo de execução: ${HEADLESS_MAX_SEC}s (~$((HEADLESS_MAX_SEC/60))min)"
+          echo "💾 Salvamento periódico: a cada ${SAVE_INTERVAL_SEC}s (~$((SAVE_INTERVAL_SEC/60))min)"
+          echo "🎯 Objetivo: terminar sempre no minuto :55"
+          echo "=" | tr -d '\n' | head -c 70 && echo
           python run_counter_headless.py 2>&1 | tee counter_output.log
-          echo "✓ Contador finalizado"
+          echo ""
+          echo "=" | tr -d '\n' | head -c 70 && echo
+          echo "✓ CONTADOR FINALIZADO"
+          echo "=" | tr -d '\n' | head -c 70 && echo
       
       - name: Upload logs on failure
         if: failure()
