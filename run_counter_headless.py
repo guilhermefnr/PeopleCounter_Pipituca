@@ -1,3 +1,4 @@
+#run_counter_headless.py
 import os
 import json
 import cv2
@@ -89,7 +90,7 @@ RIGHT_EDGE_IGNORE = 0
 PANEL_ANCHOR = "bl"
 
 # ---------- RTSP / Modelo ----------
-RTSP_URL_DEFAULT = "rtsp://admin:111229@192.168.1.2:554/cam/realmonitor?channel=1&subtype=1"
+RTSP_URL_DEFAULT = "rtsp://admin:586183@192.168.1.2:554/cam/realmonitor?channel=1&subtype=1"
 RTSP_URL = os.getenv("RTSP_URL", RTSP_URL_DEFAULT)
 MODEL_CANDIDATES = ['yolov8n.pt', 'yolov8s.pt', 'yolov8m.pt']
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
