@@ -63,36 +63,34 @@ jobs:
             torch==2.2.2+cpu torchvision==0.17.2+cpu torchaudio==2.2.2+cpu
           pip install -r requirements.txt
 
+      # MUDANÇA 1: usa camera_resolver.py para achar a câmera mesmo que o IP mude
       - name: Quick camera connectivity check
         id: cam_check
         continue-on-error: true
         timeout-minutes: 3
         shell: python
         run: |
-          import os, socket, time
-          
-          def tcp_ok(ip: str, port: int, timeout: int = 5) -> bool:
-            try:
-              with socket.create_connection((ip, port), timeout=timeout):
-                return True
-            except Exception:
-              return False
-          
-          last_ip = os.getenv('CAM_LAST_IP')
-          port = int(os.getenv('CAM_PORT', '554'))
-          
-          for i in range(3):
-            if tcp_ok(last_ip, port, timeout=5):
-              print(f"✓ Camera reachable at {last_ip}:{port}")
-              with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
-                f.write("reachable=true\n")
-              exit(0)
-            if i < 2:
-              time.sleep(60)
-          
-          print(f"✗ Camera NOT reachable at {last_ip}:{port}")
+          import os, sys
+          sys.path.insert(0, os.getcwd())
+          from camera_resolver import resolve_rtsp
+
+          last_ip  = os.getenv('CAM_LAST_IP', '')
+          cidr     = os.getenv('CAM_CIDR', '192.168.1.0/24')
+          user     = os.getenv('CAM_USER', '')
+          password = os.getenv('CAM_PASS', '')
+          path     = os.getenv('CAM_PATH', '')
+          port     = int(os.getenv('CAM_PORT', '554'))
+
+          url = resolve_rtsp(last_ip, cidr, user, password, path, port)
+
           with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
-            f.write("reachable=false\n")
+            if url:
+              print(f"✓ Camera found: {url.split('@')[1]}")
+              f.write("reachable=true\n")
+              f.write(f"rtsp_url={url}\n")
+            else:
+              print("✗ Camera NOT reachable after full scan")
+              f.write("reachable=false\n")
 
       - name: Calculate execution window
         id: timing
@@ -146,7 +144,8 @@ jobs:
         env:
           PYTHONUNBUFFERED: "1"
           HEADLESS_MAX_SEC: ${{ steps.timing.outputs.max_runtime }}
-          RTSP_URL: "rtsp://${{ secrets.CAM_USER }}:${{ secrets.CAM_PASS }}@${{ secrets.CAM_LAST_IP }}:${{ secrets.CAM_PORT }}/${{ secrets.CAM_PATH }}"
+          # MUDANÇA 2: RTSP_URL vem do resolver (já com IP correto encontrado acima)
+          RTSP_URL: ${{ steps.cam_check.outputs.rtsp_url }}
         run: |
           echo "=" | tr -d '\n' | head -c 70 && echo
           echo "🚀 INICIANDO CONTADOR HEADLESS"
